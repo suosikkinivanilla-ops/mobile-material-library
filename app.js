@@ -1,7 +1,7 @@
 const app = document.querySelector('#app');
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const storageKey = 'xinshi-materials-taken-v1';
-let data, category = '全部', query = '', batch = '全部', activeTab = 'copy', homeScroll = 0, previousRoute = '', toastTimer;
+let data, account = '全部', category = '全部', query = '', batch = '全部', activeTab = 'copy', homeScroll = 0, previousRoute = '', toastTimer;
 let taken = new Set();
 try { const saved = JSON.parse(localStorage.getItem(storageKey) || '[]'); if (Array.isArray(saved)) taken = new Set(saved.filter(x => typeof x === 'string')); } catch {}
 const e = escape;
@@ -28,13 +28,28 @@ function renderHome() {
   document.title = '心事来信 · 素材领取';
   const totalImages = data.notes.reduce((sum, n) => sum + n.images.length, 0);
   const categories = ['全部', ...new Set(data.notes.map(n => n.category))];
-  app.innerHTML = `<section class="hero"><div><div class="eyebrow">心事来信 / 内容素材库</div><h1>把心动，准备好。</h1><p>选一条素材，复制文案或保存图片。</p></div><div class="inventory"><div><strong>${data.notes.length}</strong><span>条素材</span></div><div><strong>${totalImages}</strong><span>张图片</span></div></div></section>
+  app.innerHTML = `<section class="hero"><div><div class="eyebrow">内容素材库</div><h1>素材领取</h1><p>先选账号，再找需要的文案和图片。</p></div><div class="inventory"><div><strong>${data.notes.length}</strong><span>条素材</span></div><div><strong>${totalImages}</strong><span>张图片</span></div></div></section>
+    <div class="account-filters" role="group" aria-label="按账号筛选">${[['全部','全部素材'],['秀场笔记','秀场账号'],['心事来信','心事来信']].map(([value,label]) => `<button class="account-chip" data-account="${value}" aria-pressed="${account === value}">${label}</button>`).join('')}</div>
     <div class="toolbar"><label class="search-wrap"><span aria-hidden="true">⌕</span><input type="search" id="search" aria-label="搜索素材" placeholder="搜标题、人物或关键词" value="${e(query)}"></label><select id="batch" aria-label="按素材批次筛选"><option value="全部">全部日期</option>${data.batches.map(b => `<option value="${e(b.id)}" ${batch === b.id ? 'selected' : ''}>${e(b.date)} · ${e(b.product)}</option>`).join('')}</select></div>
     <div class="filters" role="group" aria-label="按内容类型筛选">${categories.map(c => `<button class="chip" data-filter="${e(c)}" aria-pressed="${category === c}">${e(c)}</button>`).join('')}<button class="chip" data-filter="未取用" aria-pressed="${category === '未取用'}">未取用</button></div>
-    <div class="section-caption"><span id="result-count"></span><span>最新素材优先</span></div><div id="notes" class="note-grid"></div>
+    <div class="section-caption"><span id="result-count"></span><span>按日期从新到旧</span></div><div id="notes"></div>
     <footer class="footnote">收藏这个页面，以后新素材也放在这里。<br>取用标记只保存在当前浏览器，不代表已经发布。<br>这里领取的是笔记素材，测试入口仍用对应商品卡。</footer>`;
   document.querySelector('#search').addEventListener('input', event => { query = event.target.value; renderCards(); });
   document.querySelector('#batch').addEventListener('change', event => { batch = event.target.value; renderCards(); });
+  for (const button of document.querySelectorAll('[data-account]')) button.addEventListener('click', () => {
+    account = button.dataset.account;
+    batch = '全部';
+    category = '全部';
+    document.querySelector('#batch').value = '全部';
+    const accountNotes = data.notes.filter(n => account === '全部' || (account === '秀场笔记' ? n.product === '秀场笔记' : n.product !== '秀场笔记'));
+    const accountCategories = new Set(accountNotes.map(n => n.category));
+    document.querySelectorAll('[data-filter]').forEach(b => {
+      b.setAttribute('aria-pressed', b.dataset.filter === category);
+      b.hidden = !['全部', '未取用'].includes(b.dataset.filter) && !accountCategories.has(b.dataset.filter);
+    });
+    document.querySelectorAll('[data-account]').forEach(b => b.setAttribute('aria-pressed', b.dataset.account === account));
+    renderCards();
+  });
   for (const button of document.querySelectorAll('[data-filter]')) button.addEventListener('click', () => {
     category = button.dataset.filter;
     document.querySelectorAll('[data-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.filter === category));
@@ -44,9 +59,10 @@ function renderHome() {
 }
 function renderCards() {
   const q = query.trim().toLowerCase();
-  const filtered = data.notes.filter(n => (batch === '全部' || n.batch === batch) && (category === '全部' || (category === '未取用' ? !taken.has(n.id) : n.category === category)) && (!q || `${n.title} ${n.body} ${n.category} ${n.product}`.toLowerCase().includes(q)));
+  const filtered = data.notes.filter(n => (account === '全部' || (account === '秀场笔记' ? n.product === '秀场笔记' : n.product !== '秀场笔记')) && (batch === '全部' || n.batch === batch) && (category === '全部' || (category === '未取用' ? !taken.has(n.id) : n.category === category)) && (!q || `${n.title} ${n.body} ${n.category} ${n.product}`.toLowerCase().includes(q))).sort((a, b) => b.date.localeCompare(a.date));
   document.querySelector('#result-count').textContent = `${filtered.length} 条素材 · ${filtered.reduce((sum, n) => sum + n.images.length, 0)} 张图片`;
-  document.querySelector('#notes').innerHTML = filtered.length ? filtered.map(n => `<article class="note-card"><a class="card-art" href="${noteUrl(n)}" aria-label="领取：${e(n.title)}"><img src="${n.images[0].thumb}" width="${n.images[0].width}" height="${n.images[0].height}" loading="lazy" decoding="async" alt="${e(n.title)}封面"><span class="card-count">${n.images.length} 张配图</span></a><div class="card-body"><div class="card-meta"><span class="card-category">${e(n.category)}</span><time datetime="${e(n.date)}">${e(n.date.slice(5).replace('-', '.'))}</time></div><h2><a href="${noteUrl(n)}">${e(n.title)}</a></h2><div class="card-bottom"><a class="card-open" href="${noteUrl(n)}">${n.category === '主页素材' ? '领取头像与背景' : '领取文案与配图'}</a>${taken.has(n.id) ? '<span class="taken-badge">已取用 ✓</span>' : ''}</div></div></article>`).join('') : '<p class="empty">没有找到这类素材。试试其他关键词或筛选条件。</p>';
+  const dates = [...new Set(filtered.map(n => n.date))];
+  document.querySelector('#notes').innerHTML = filtered.length ? dates.map(date => `<section class="date-group"><h2 class="date-heading">${e(date)}</h2><div class="note-grid">${filtered.filter(n => n.date === date).map(n => `<article class="note-card"><a class="card-art" href="${noteUrl(n)}" aria-label="领取：${e(n.title)}"><img src="${n.images[0].thumb}" width="${n.images[0].width}" height="${n.images[0].height}" loading="lazy" decoding="async" alt="${e(n.title)}封面"><span class="card-count">${n.images.length} 张配图</span></a><div class="card-body"><div class="card-meta"><span class="card-category">${e(n.category)}</span><time datetime="${e(n.date)}">${e(n.date.slice(5).replace('-', '.'))}</time></div><h2><a href="${noteUrl(n)}">${e(n.title)}</a></h2><div class="card-bottom"><a class="card-open" href="${noteUrl(n)}">${n.category === '主页素材' ? '领取头像与背景' : '领取文案与配图'}</a>${taken.has(n.id) ? '<span class="taken-badge">已取用 ✓</span>' : ''}</div></div></article>`).join('')}</div></section>`).join('') : '<p class="empty">没有找到这类素材。试试其他关键词或筛选条件。</p>';
 }
 function renderNote(note) {
   document.title = `${note.title} · 心事来信`;
